@@ -4,6 +4,7 @@ using System.Data;
 using System.IO;
 using System.Text;
 using NPOI.HSSF.UserModel;
+using NPOI.SS.Formula.Functions;
 using NPOI.SS.UserModel;
 
 namespace csv_to_xls
@@ -35,7 +36,7 @@ namespace csv_to_xls
                 try
                 {
                     var s = list.Rows.Count;
-                    if (list != null && list.Rows.Count > 0)
+                    if (list.Rows.Count > 0)
                     {
                         IWorkbook workbook = new HSSFWorkbook();
                         var sheet = workbook.CreateSheet("Sheet1");
@@ -43,21 +44,19 @@ namespace csv_to_xls
                         var columnCount = list.Columns.Count; //列数
 
                         //设置列头
-                        var row = sheet.CreateRow(0);
-                        ICell cell = null;
-                        for (var c = 0; c < columnCount; c++)
-                        {
-                            cell = row.CreateCell(c);
-                            cell.SetCellValue(list.Columns[c].ColumnName);
-                        }
+                        //for (var c = 0; c < columnCount; c++)
+                        //{
+                        //    cell = row.CreateCell(c);
+                        //    cell.SetCellValue(list.Columns[c].ColumnName);
+                        //}
 
                         //设置每行每列的单元格,
                         for (var i = 0; i < rowCount; i++)
                         {
-                            row = sheet.CreateRow(i + 1);
+                            var row = sheet.CreateRow(i);
                             for (var j = 0; j < columnCount; j++)
                             {
-                                cell = row.CreateCell(j); //excel第二行开始写入数据
+                                var cell = row.CreateCell(j);
                                 cell.SetCellValue(list.Rows[i][j].ToString());
                             }
                         }
@@ -156,6 +155,12 @@ namespace csv_to_xls
                 //如果包含偶数个引号，说明该行数据中出现回车符或包含逗号
                 if (!IfOddQuota(csvDataLine))
                 {
+                    if (IsFirst)
+                    {
+                        AddRowColumns(csvDataLine.Split(',').Length);
+                        IsFirst = false;
+                    }
+
                     AddNewDataLine(csvDataLine);
 
                     csvDataLine = "";
@@ -165,6 +170,22 @@ namespace csv_to_xls
             sr.Close();
             //数据行出现奇数个引号
             if (csvDataLine.Length > 0) throw new Exception("CSV文件的格式有错误");
+        }
+
+        // 有肯能表头会重复，所以我们自己造一个。
+        private void AddRowColumns(int length)
+        {
+            var index = 0;
+            for (; length > 0; length--)
+            {
+                AddNewCol(index++);
+            }
+        }
+
+        private void AddNewCol(int index)
+        {
+            var dc = new DataColumn("Column_" + index);
+            csvDT.Columns.Add(dc);
         }
 
         /// <summary>
@@ -261,51 +282,45 @@ namespace csv_to_xls
             cellData = "";
 
             for (var j = 0; j < dataArray.Length; j++)
-                if (IsFirst)
+            {
+                if (oddStartQuota)
                 {
-                    var dc = new DataColumn(GetHandleData(dataArray[j]));
-                    csvDT.Columns.Add(dc);
+                    //因为前面用逗号分割,所以要加上逗号
+                    cellData += "," + dataArray[j];
+                    //是否以奇数个引号结尾
+                    if (IfOddEndQuota(dataArray[j]))
+                    {
+                        SetCellVal(Row, Column, GetHandleData(cellData));
+                        Column++;
+                        oddStartQuota = false;
+                    }
                 }
                 else
                 {
-                    if (oddStartQuota)
+                    //是否以奇数个引号开始
+                    if (IfOddStartQuota(dataArray[j]))
                     {
-                        //因为前面用逗号分割,所以要加上逗号
-                        cellData += "," + dataArray[j];
-                        //是否以奇数个引号结尾
-                        if (IfOddEndQuota(dataArray[j]))
+                        //是否以奇数个引号结尾,不能是一个双引号,并且不是奇数个引号
+
+                        if (IfOddEndQuota(dataArray[j]) && dataArray[j].Length > 2 && !IfOddQuota(dataArray[j]))
                         {
-                            Row[Column] = GetHandleData(cellData);
+                            SetCellVal(Row, Column, GetHandleData(dataArray[j]));
                             Column++;
                             oddStartQuota = false;
+                        }
+                        else
+                        {
+                            oddStartQuota = true;
+                            cellData = dataArray[j];
                         }
                     }
                     else
                     {
-                        //是否以奇数个引号开始
-                        if (IfOddStartQuota(dataArray[j]))
-                        {
-                            //是否以奇数个引号结尾,不能是一个双引号,并且不是奇数个引号
-
-                            if (IfOddEndQuota(dataArray[j]) && dataArray[j].Length > 2 && !IfOddQuota(dataArray[j]))
-                            {
-                                Row[Column] = GetHandleData(dataArray[j]);
-                                Column++;
-                                oddStartQuota = false;
-                            }
-                            else
-                            {
-                                oddStartQuota = true;
-                                cellData = dataArray[j];
-                            }
-                        }
-                        else
-                        {
-                            Row[Column] = GetHandleData(dataArray[j]);
-                            Column++;
-                        }
+                        SetCellVal(Row, Column, GetHandleData(dataArray[j]));
+                        Column++;
                     }
                 }
+            }
 
             if (!IsFirst) csvDT.Rows.Add(Row);
 
@@ -313,6 +328,15 @@ namespace csv_to_xls
             if (oddStartQuota) throw new Exception("数据格式有问题");
         }
 
+        private void SetCellVal(DataRow row, int colIndex, string val)
+        {
+            if (csvDT.Columns.Count <= colIndex)
+            {
+                AddNewCol(colIndex);
+            }
+
+            row[colIndex] = val;
+        }
 
         /// <summary>
         ///     去掉格子的首尾引号，把双引号变成单引号
